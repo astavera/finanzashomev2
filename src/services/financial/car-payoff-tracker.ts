@@ -27,25 +27,62 @@ function getCarPayoffDebtToday(today = new Date()) {
   return CAR_PAYOFF_CURRENT_DEBT * Math.pow(1 + dailyRate, days);
 }
 
-async function syncCarPayoffGoal(householdId: string, delta: number) {
-  const { data: projects, error } = await supabase
-    .from('projects')
-    .select('id, project_name, current_amount, target_amount')
+function getCurrentCarPayoffDebtToday(carPayoffRows: CarPayoffRowWithWeek[]) {
+  const baseDebtToday = getCarPayoffDebtToday();
+  const monthlyRate = CAR_PAYOFF_APR / 100 / 12;
+  const firstWeekNotes = parseCarPayoffNotes(
+    carPayoffRows.find((row) => row.weekly_budgets?.week_number === 1)?.notes ?? null,
+  );
+  const monthlyInterest = baseDebtToday * monthlyRate;
+  const principalFromPayment = firstWeekNotes.monthlyPaymentPaid
+    ? Math.max(0, CAR_PAYOFF_MONTHLY_PAYMENT - monthlyInterest)
+    : 0;
+  const paidWeeklyExtra = carPayoffRows.reduce((sum, row) => {
+    const notes = parseCarPayoffNotes(row.notes);
+    return sum + (notes.saved ? Number(row.collected_amount ?? DEFAULT_CAR_PAYOFF_TARGET) : 0);
+  }, 0);
+  const appliedPaymentsToDate = firstWeekNotes.appliedPaymentsToDate ?? 0;
+
+  return Math.max(0, baseDebtToday - appliedPaymentsToDate - principalFromPayment - paidWeeklyExtra);
+}
+
+async function getCarPayoffRows(householdId: string) {
+  const { data, error } = await supabase
+    .from('car_payoff_tracker')
+    .select('*, weekly_budgets(week_number)')
     .eq('household_id', householdId)
-    .eq('currency', 'USD')
-    .eq('is_active', true);
+    .order('created_at', { ascending: true });
 
   if (error) {
     throw error;
   }
 
+  return data as CarPayoffRowWithWeek[];
+}
+
+async function syncCarPayoffGoal(householdId: string, delta: number) {
+  const [projectsResult, carPayoffRows] = await Promise.all([
+    supabase
+      .from('projects')
+      .select('id, project_name, current_amount, target_amount')
+      .eq('household_id', householdId)
+      .eq('currency', 'USD')
+      .eq('is_active', true),
+    getCarPayoffRows(householdId),
+  ]);
+
+  if (projectsResult.error) {
+    throw projectsResult.error;
+  }
+
+  const projects = projectsResult.data;
   const carPayoffGoal = projects.find((project) => namesMatch(project.project_name, CAR_PAYOFF_GOAL_NAME));
 
   if (!carPayoffGoal) {
     return;
   }
 
-  const targetAmount = getCarPayoffDebtToday();
+  const targetAmount = getCurrentCarPayoffDebtToday(carPayoffRows);
   const nextAmount = Math.max(0, Number(carPayoffGoal.current_amount ?? 0) + delta);
   const { error: updateError } = await supabase
     .from('projects')
@@ -127,8 +164,8 @@ async function ensureInitialMayPayments(
     }),
   );
 
-  if (syncedWeeklyGoal) {
-    await syncCarPayoffGoal(householdId, DEFAULT_CAR_PAYOFF_TARGET);
+  if (changed) {
+    await syncCarPayoffGoal(householdId, syncedWeeklyGoal ? DEFAULT_CAR_PAYOFF_TARGET : 0);
   }
 
   return changed;
