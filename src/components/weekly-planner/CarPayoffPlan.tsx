@@ -31,16 +31,23 @@ export function CarPayoffPlan({
   const [aiLoading, setAiLoading] = useState(false);
   const metrics = buildCarPayoffMetrics(carPayoff, accumulatedSavings, appliedPaymentsToDate);
 
-  const askAI = async () => {
+  const askAI = async (question: string) => {
     setAiLoading(true);
     setAiAdvice(null);
     try {
       const { data, error } = await supabase.functions.invoke('car-payoff-advice', {
         body: {
+          question,
           currentDebt: metrics.currentDebtToday,
+          baseDebtToday: metrics.baseDebtToday,
           apr: APR,
           monthlyPayment: MONTHLY_PAYMENT,
           totalSaved: metrics.availableToPay,
+          paidWeeklyExtra: metrics.paidWeeklyExtra,
+          pendingWeeklyExtra: metrics.pendingWeeklyExtra,
+          monthlyPaid: metrics.monthlyPaid,
+          totalAppliedPayments: metrics.totalAppliedPayments,
+          projectedDebt: metrics.projectedDebt,
           monthsUntilPayoff: monthsUntilPayoff(),
         },
       });

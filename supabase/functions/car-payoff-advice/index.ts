@@ -9,32 +9,54 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { currentDebt, apr, monthlyPayment, totalSaved, monthsUntilPayoff } = await req.json();
+    const {
+      question,
+      currentDebt,
+      baseDebtToday,
+      apr,
+      monthlyPayment,
+      totalSaved,
+      paidWeeklyExtra,
+      pendingWeeklyExtra,
+      monthlyPaid,
+      totalAppliedPayments,
+      projectedDebt,
+      monthsUntilPayoff,
+    } = await req.json();
     const gatewayApiKey = Deno.env.get("AI_GATEWAY_API_KEY");
     const gatewayUrl = Deno.env.get("AI_GATEWAY_URL");
     if (!gatewayApiKey) throw new Error("AI_GATEWAY_API_KEY is not configured");
     if (!gatewayUrl) throw new Error("AI_GATEWAY_URL is not configured");
 
-    const prompt = `You are a personal finance advisor. Analyze this car loan scenario and give a clear, concise recommendation in Spanish.
+    const userQuestion = typeof question === "string" && question.trim().length > 0
+      ? question.trim()
+      : "Me conviene abonar ahora o esperar a diciembre?";
+
+    const prompt = `You are a personal finance advisor. Answer the user's specific car payoff question in Spanish.
 
 Car Loan Details:
-- Current debt: $${currentDebt.toFixed(2)}
+- Current debt after applied payments: $${Number(currentDebt).toFixed(2)}
+- Base debt today before applied payments: $${Number(baseDebtToday ?? currentDebt).toFixed(2)}
 - APR: ${apr}%
 - Monthly payment: $${monthlyPayment}
-- Extra savings accumulated (in bank): $${totalSaved.toFixed(2)}
+- Monthly payment marked paid: ${monthlyPaid ? "yes" : "no"}
+- Total applied payments: $${Number(totalAppliedPayments ?? 0).toFixed(2)}
+- Weekly extra already paid this month: $${Number(paidWeeklyExtra ?? 0).toFixed(2)}
+- Weekly extra still pending this month: $${Number(pendingWeeklyExtra ?? 0).toFixed(2)}
+- Cash available for extra car payoff: $${Number(totalSaved ?? 0).toFixed(2)}
+- Projected debt if pending weekly extra is paid: $${Number(projectedDebt ?? currentDebt).toFixed(2)}
 - Months until planned payoff (December 2026): ~${monthsUntilPayoff}
 
-The user wants to know:
-1. Should they use their accumulated savings ($${totalSaved.toFixed(2)}) to make a lump-sum payment on the car right now?
-2. Or should they keep saving and pay it all in December 2026?
+User question:
+${userQuestion}
 
 Consider:
 - Interest savings from paying early vs keeping cash liquid
-- Calculate approximate interest they'd save by paying now vs waiting
 - Emergency fund implications
-- Give a clear YES or NO recommendation with numbers to back it up
+- Give a clear practical answer with numbers when useful
+- If the user asks for a calculation, show the calculation briefly
 
-Keep response under 200 words. Be direct and practical.`;
+Keep response under 220 words. Be direct and practical.`;
 
     const response = await fetch(gatewayUrl, {
       method: "POST",
