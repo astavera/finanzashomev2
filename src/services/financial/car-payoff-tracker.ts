@@ -14,14 +14,20 @@ import type { CarPayoffRowWithWeek, CarPayoffTrackerUpdate, WeeklyBudgetRow } fr
 
 const CAR_PAYOFF_GOAL_NAME = 'Car Payoff';
 
-async function syncCarPayoffGoal(householdId: string, delta: number) {
-  if (delta === 0) {
-    return;
-  }
+function getCarPayoffDebtToday(today = new Date()) {
+  const dailyRate = CAR_PAYOFF_APR / 100 / 365;
+  const days = Math.max(
+    0,
+    Math.floor((today.getTime() - CAR_PAYOFF_DEBT_AS_OF.getTime()) / (1000 * 60 * 60 * 24)),
+  );
 
+  return CAR_PAYOFF_CURRENT_DEBT * Math.pow(1 + dailyRate, days);
+}
+
+async function syncCarPayoffGoal(householdId: string, delta: number) {
   const { data: projects, error } = await supabase
     .from('projects')
-    .select('id, project_name, current_amount')
+    .select('id, project_name, current_amount, target_amount')
     .eq('household_id', householdId)
     .eq('currency', 'USD')
     .eq('is_active', true);
@@ -36,15 +42,23 @@ async function syncCarPayoffGoal(householdId: string, delta: number) {
     return;
   }
 
+  const targetAmount = getCarPayoffDebtToday();
   const nextAmount = Math.max(0, Number(carPayoffGoal.current_amount ?? 0) + delta);
   const { error: updateError } = await supabase
     .from('projects')
-    .update({ current_amount: nextAmount })
+    .update({
+      current_amount: nextAmount,
+      target_amount: targetAmount,
+    })
     .eq('id', carPayoffGoal.id);
 
   if (updateError) {
     throw updateError;
   }
+}
+
+export async function syncCarPayoffGoalTarget(householdId: string) {
+  await syncCarPayoffGoal(householdId, 0);
 }
 
 export async function ensureCarPayoff(householdId: string, weeklyBudgets: WeeklyBudgetRow[]) {
@@ -125,6 +139,7 @@ export async function ensureMonthlyPlannerReset(householdIdOverride?: string) {
   const householdId = householdIdOverride ?? await getHouseholdId();
   const weeklyBudgets = await ensureWeeklyBudgets(householdId);
   const carPayoffRows = await ensureCarPayoff(householdId, weeklyBudgets);
+  await syncCarPayoffGoalTarget(householdId);
   const currentMonthKey = getCurrentMonthKey();
 
   const firstWeekBudget = weeklyBudgets.find((budget) => budget.week_number === 1);
