@@ -47,7 +47,9 @@ export async function getFinancialSettings(): Promise<FinancialSettings> {
     return {
       week,
       target: row?.target_amount ?? DEFAULT_CAR_PAYOFF_TARGET,
-      collected: row?.collected_amount ?? 0,
+      collected: row?.collected_amount && row.collected_amount > 0
+        ? row.collected_amount
+        : DEFAULT_CAR_PAYOFF_TARGET,
       saved: notes.saved ?? false,
       monthlyPaymentPaid: week === 1 ? firstCarPayoffNotes.monthlyPaymentPaid ?? false : false,
     };

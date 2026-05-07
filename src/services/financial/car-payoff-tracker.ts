@@ -35,7 +35,7 @@ export async function ensureCarPayoff(householdId: string, weeklyBudgets: Weekly
         household_id: householdId,
         weekly_budget_id: budget.id,
         target_amount: DEFAULT_CAR_PAYOFF_TARGET,
-        collected_amount: 0,
+        collected_amount: DEFAULT_CAR_PAYOFF_TARGET,
         notes: stringifyCarPayoffNotes({
           saved: false,
           monthlyPaymentPaid: budget.week_number === 1 ? false : undefined,
@@ -52,6 +52,32 @@ export async function ensureCarPayoff(householdId: string, weeklyBudgets: Weekly
     if (insertError) {
       throw insertError;
     }
+
+    return ensureCarPayoff(householdId, weeklyBudgets);
+  }
+
+  const rowsToNormalize = rows.filter(
+    (row) =>
+      Number(row.target_amount ?? 0) !== DEFAULT_CAR_PAYOFF_TARGET ||
+      Number(row.collected_amount ?? 0) !== DEFAULT_CAR_PAYOFF_TARGET,
+  );
+
+  if (rowsToNormalize.length > 0) {
+    await Promise.all(
+      rowsToNormalize.map(async (row) => {
+        const { error: updateError } = await supabase
+          .from('car_payoff_tracker')
+          .update({
+            target_amount: DEFAULT_CAR_PAYOFF_TARGET,
+            collected_amount: DEFAULT_CAR_PAYOFF_TARGET,
+          })
+          .eq('id', row.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+      }),
+    );
 
     return ensureCarPayoff(householdId, weeklyBudgets);
   }
@@ -91,7 +117,7 @@ export async function ensureMonthlyPlannerReset(householdIdOverride?: string) {
 
         const { error } = await supabase
           .from('car_payoff_tracker')
-          .update({ collected_amount: 0, notes: stringifyCarPayoffNotes(nextNotes) })
+          .update({ collected_amount: DEFAULT_CAR_PAYOFF_TARGET, notes: stringifyCarPayoffNotes(nextNotes) })
           .eq('id', row.id);
 
         if (error) {
@@ -148,7 +174,7 @@ export async function ensureMonthlyPlannerReset(householdIdOverride?: string) {
 
       const { error } = await supabase
         .from('car_payoff_tracker')
-        .update({ collected_amount: 0, notes: stringifyCarPayoffNotes(nextNotes) })
+        .update({ collected_amount: DEFAULT_CAR_PAYOFF_TARGET, notes: stringifyCarPayoffNotes(nextNotes) })
         .eq('id', row.id);
 
       if (error) {

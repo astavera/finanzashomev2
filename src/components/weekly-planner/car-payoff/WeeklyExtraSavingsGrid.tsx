@@ -1,6 +1,5 @@
 import { CheckCircle2, TrendingDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
 import { formatUSD } from '@/lib/currency';
 import type { CarPayoffWeek } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -36,19 +35,13 @@ export function WeeklyExtraSavingsGrid({ carPayoff, onUpdate }: WeeklyExtraSavin
               <span className="text-sm font-medium">Semana {week.week}</span>
               {week.saved && <CheckCircle2 className="w-3 h-3 text-positive" />}
             </label>
-            <Input
-              type="number"
-              value={week.collected}
-              placeholder="0"
-              className="h-8 text-xs bg-secondary/30 border-border/30"
-              onChange={(event) => onUpdate(week.week, { collected: Number(event.target.value) })}
-            />
+            <div className="flex h-8 items-center rounded-md border border-border/30 bg-secondary/30 px-3 text-xs font-semibold">
+              {formatUSD(WEEKLY_EXTRA_TARGET)}
+            </div>
             <p className="text-[10px] text-muted-foreground mt-1">
               {week.saved
-                ? `Abonado: ${formatUSD(week.collected)}`
-                : week.collected >= WEEKLY_EXTRA_TARGET
-                  ? 'Listo para abonar'
-                  : `Pendiente ${formatUSD(Math.max(WEEKLY_EXTRA_TARGET - week.collected, 0))}`}
+                ? `Abonado: ${formatUSD(WEEKLY_EXTRA_TARGET)}`
+                : 'Listo para abonar'}
             </p>
           </div>
         ))}
