@@ -14,6 +14,8 @@ import { ensureWeeklyBudgets } from './weekly-budgets';
 import type { CarPayoffRowWithWeek, CarPayoffTrackerUpdate, WeeklyBudgetRow } from './types';
 
 const CAR_PAYOFF_GOAL_NAME = 'Car Payoff';
+const CAR_PAYOFF_INITIAL_MONTH_KEY = '2026-05';
+const CAR_PAYOFF_INITIAL_PAID_WEEK = 1;
 
 function getCarPayoffDebtToday(today = new Date()) {
   const dailyRate = CAR_PAYOFF_APR / 100 / 365;
@@ -62,6 +64,76 @@ export async function syncCarPayoffGoalTarget(householdId: string) {
   await syncCarPayoffGoal(householdId, 0);
 }
 
+function getInitialCarPayoffNotes(weekNumber: number) {
+  const isInitialPaidWeek = weekNumber === CAR_PAYOFF_INITIAL_PAID_WEEK;
+
+  return {
+    saved: isInitialPaidWeek,
+    monthlyPaymentPaid: weekNumber === 1 ? true : undefined,
+    accumulatedSavings: weekNumber === 1 ? 0 : undefined,
+    appliedPaymentsToDate: weekNumber === 1 ? 0 : undefined,
+    debtBaselineAmount: weekNumber === 1 ? CAR_PAYOFF_CURRENT_DEBT : undefined,
+    lastMonthlyReset: weekNumber === 1 ? CAR_PAYOFF_INITIAL_MONTH_KEY : undefined,
+  };
+}
+
+async function ensureInitialMayPayments(
+  householdId: string,
+  carPayoffRows: CarPayoffRowWithWeek[],
+  weeklyBudgets: WeeklyBudgetRow[],
+  currentMonthKey: string,
+) {
+  if (currentMonthKey !== CAR_PAYOFF_INITIAL_MONTH_KEY) {
+    return false;
+  }
+
+  let syncedWeeklyGoal = false;
+  let changed = false;
+
+  await Promise.all(
+    carPayoffRows.map(async (row) => {
+      const weekNumber =
+        row.weekly_budgets?.week_number ??
+        weeklyBudgets.find((budget) => budget.id === row.weekly_budget_id)?.week_number ??
+        1;
+
+      const currentNotes = parseCarPayoffNotes(row.notes);
+      const nextNotes = {
+        ...currentNotes,
+        saved: weekNumber === CAR_PAYOFF_INITIAL_PAID_WEEK ? true : currentNotes.saved,
+        monthlyPaymentPaid: weekNumber === 1 ? true : currentNotes.monthlyPaymentPaid,
+        debtBaselineAmount: weekNumber === 1 ? CAR_PAYOFF_CURRENT_DEBT : currentNotes.debtBaselineAmount,
+        lastMonthlyReset: weekNumber === 1 ? currentMonthKey : currentNotes.lastMonthlyReset,
+      };
+
+      const rowChanged = JSON.stringify(currentNotes) !== JSON.stringify(nextNotes);
+      if (!rowChanged) {
+        return;
+      }
+
+      changed = true;
+      if (weekNumber === CAR_PAYOFF_INITIAL_PAID_WEEK && !currentNotes.saved) {
+        syncedWeeklyGoal = true;
+      }
+
+      const { error } = await supabase
+        .from('car_payoff_tracker')
+        .update({ collected_amount: DEFAULT_CAR_PAYOFF_TARGET, notes: stringifyCarPayoffNotes(nextNotes) })
+        .eq('id', row.id);
+
+      if (error) {
+        throw error;
+      }
+    }),
+  );
+
+  if (syncedWeeklyGoal) {
+    await syncCarPayoffGoal(householdId, DEFAULT_CAR_PAYOFF_TARGET);
+  }
+
+  return changed;
+}
+
 export async function ensureCarPayoff(householdId: string, weeklyBudgets: WeeklyBudgetRow[]) {
   const { data, error } = await supabase
     .from('car_payoff_tracker')
@@ -87,13 +159,7 @@ export async function ensureCarPayoff(householdId: string, weeklyBudgets: Weekly
         weekly_budget_id: budget.id,
         target_amount: DEFAULT_CAR_PAYOFF_TARGET,
         collected_amount: DEFAULT_CAR_PAYOFF_TARGET,
-        notes: stringifyCarPayoffNotes({
-          saved: false,
-          monthlyPaymentPaid: budget.week_number === 1 ? false : undefined,
-          accumulatedSavings: budget.week_number === 1 ? 0 : undefined,
-          appliedPaymentsToDate: budget.week_number === 1 ? 0 : undefined,
-          debtBaselineAmount: budget.week_number === 1 ? CAR_PAYOFF_CURRENT_DEBT : undefined,
-        }),
+        notes: stringifyCarPayoffNotes(getInitialCarPayoffNotes(budget.week_number)),
       }));
 
     const { error: insertError } = await supabase
@@ -150,6 +216,10 @@ export async function ensureMonthlyPlannerReset(householdIdOverride?: string) {
   const firstWeekNotes = parseCarPayoffNotes(firstWeekRow?.notes ?? null);
   const debtBaselineAmount = firstWeekNotes.debtBaselineAmount ?? 0;
 
+  if (await ensureInitialMayPayments(householdId, carPayoffRows, weeklyBudgets, currentMonthKey)) {
+    return;
+  }
+
   if (debtBaselineAmount !== CAR_PAYOFF_CURRENT_DEBT) {
     await Promise.all(
       carPayoffRows.map(async (row) => {
@@ -158,10 +228,11 @@ export async function ensureMonthlyPlannerReset(householdIdOverride?: string) {
           weeklyBudgets.find((budget) => budget.id === row.weekly_budget_id)?.week_number ??
           1;
         const currentNotes = parseCarPayoffNotes(row.notes);
+        const initialNotes = getInitialCarPayoffNotes(weekNumber);
         const nextNotes = {
           ...currentNotes,
-          saved: false,
-          monthlyPaymentPaid: weekNumber === 1 ? false : currentNotes.monthlyPaymentPaid,
+          saved: initialNotes.saved,
+          monthlyPaymentPaid: weekNumber === 1 ? initialNotes.monthlyPaymentPaid : currentNotes.monthlyPaymentPaid,
           appliedPaymentsToDate: weekNumber === 1 ? 0 : currentNotes.appliedPaymentsToDate,
           debtBaselineAmount: weekNumber === 1 ? CAR_PAYOFF_CURRENT_DEBT : currentNotes.debtBaselineAmount,
           lastMonthlyReset: weekNumber === 1 ? currentMonthKey : currentNotes.lastMonthlyReset,
