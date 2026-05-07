@@ -5,6 +5,7 @@ import { getHouseholdId, getWeeklyBudgetId } from '../household';
 import {
   CAR_PAYOFF_APR,
   CAR_PAYOFF_CURRENT_DEBT,
+  CAR_PAYOFF_DEBT_AS_OF,
   CAR_PAYOFF_MONTHLY_PAYMENT,
   DEFAULT_CAR_PAYOFF_TARGET,
 } from './constants';
