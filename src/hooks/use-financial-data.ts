@@ -14,7 +14,7 @@ export function useCreditCardsQuery() {
 export function useWeeklyExpensesQuery() {
   return useQuery({
     queryKey: ['weekly-expenses'],
-    queryFn: listWeeklyExpenses,
+    queryFn: () => listWeeklyExpenses(),
   });
 }
 
