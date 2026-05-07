@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { CarPayoffWeek } from '@/lib/types';
+import { namesMatch } from '@/lib/name-matching';
 import { getHouseholdId, getWeeklyBudgetId } from '../household';
 import {
   CAR_PAYOFF_APR,
@@ -10,6 +11,41 @@ import {
 import { getCurrentMonthKey, parseCarPayoffNotes, stringifyCarPayoffNotes } from './car-payoff-notes';
 import { ensureWeeklyBudgets } from './weekly-budgets';
 import type { CarPayoffRowWithWeek, CarPayoffTrackerUpdate, WeeklyBudgetRow } from './types';
+
+const CAR_PAYOFF_GOAL_NAME = 'Car Payoff';
+
+async function syncCarPayoffGoal(householdId: string, delta: number) {
+  if (delta === 0) {
+    return;
+  }
+
+  const { data: projects, error } = await supabase
+    .from('projects')
+    .select('id, project_name, current_amount')
+    .eq('household_id', householdId)
+    .eq('currency', 'USD')
+    .eq('is_active', true);
+
+  if (error) {
+    throw error;
+  }
+
+  const carPayoffGoal = projects.find((project) => namesMatch(project.project_name, CAR_PAYOFF_GOAL_NAME));
+
+  if (!carPayoffGoal) {
+    return;
+  }
+
+  const nextAmount = Math.max(0, Number(carPayoffGoal.current_amount ?? 0) + delta);
+  const { error: updateError } = await supabase
+    .from('projects')
+    .update({ current_amount: nextAmount })
+    .eq('id', carPayoffGoal.id);
+
+  if (updateError) {
+    throw updateError;
+  }
+}
 
 export async function ensureCarPayoff(householdId: string, weeklyBudgets: WeeklyBudgetRow[]) {
   const { data, error } = await supabase
@@ -200,9 +236,12 @@ export async function updateCarPayoffWeek(weekNumber: number, updates: Partial<C
   }
 
   const currentNotes = parseCarPayoffNotes(currentRow.notes);
+  const wasSaved = currentNotes.saved ?? false;
+  const nextSaved = updates.saved ?? wasSaved;
+  const collectedAmount = updates.collected ?? Number(currentRow.collected_amount ?? DEFAULT_CAR_PAYOFF_TARGET);
   const nextNotes = {
     ...currentNotes,
-    saved: updates.saved ?? currentNotes.saved,
+    saved: nextSaved,
     monthlyPaymentPaid: updates.monthlyPaymentPaid ?? currentNotes.monthlyPaymentPaid,
     accumulatedSavings: updates.week === 1 ? currentNotes.accumulatedSavings : currentNotes.accumulatedSavings,
   };
@@ -221,6 +260,10 @@ export async function updateCarPayoffWeek(weekNumber: number, updates: Partial<C
 
   if (error) {
     throw error;
+  }
+
+  if (updates.saved !== undefined && wasSaved !== nextSaved) {
+    await syncCarPayoffGoal(householdId, nextSaved ? collectedAmount : -collectedAmount);
   }
 }
 
